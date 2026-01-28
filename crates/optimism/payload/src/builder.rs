@@ -781,45 +781,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    mod mock {
-        use reth_evm::{ConfigureEvm, Evm};
-        use reth_optimism_chainspec::OP_MAINNET;
-        use reth_optimism_evm::OpEvmConfig;
-        use reth_optimism_node::OpBuilder;
-        use reth_primitives_traits::TxTy;
-        use reth_transaction_pool::{
-            pool::txpool::TxPool,
-            test_utils::{mock_tx_pool, MockTransaction, MockTxPool},
-            CoinbaseTipOrdering,
-        };
-
-        use crate::OpPayloadBuilderAttributes;
-
-        #[test]
-        fn mock() {
-            // let pool = mock_tx_pool();
-            // // FullNodeProvider
-            // let client = ();
-            // let evm_config = OpEvmConfig::optimism(OP_MAINNET.clone());
-
-            // type MockOpPayloadBuilder = OpPayloadBuilder<
-            //     TxPool<CoinbaseTipOrdering<MockTransaction>>,
-            //     (),
-            //     OpEvmConfig,
-            //     (),
-            //     (),
-            // >;
-
-            // // let mockpayloadbuilder: MockOpPayloadBuilder =
-            // //     OpPayloadBuilder::new(pool, client, evm_config)
-            // //         .with_transactions(())
-            // //         .build_payload();
-
-            // mockpayloadbuilder.best_transactions
-
-            let pb = OpPayloadBuilder::new(true);
-        }
-    }
 
     mod data_availability_limits {
         use crate::builder::ExecutionInfo;

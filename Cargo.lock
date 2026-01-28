@@ -9859,6 +9859,8 @@ dependencies = [
  "op-alloy-network",
  "op-alloy-rpc-types-engine",
  "op-revm",
+ "proptest",
+ "reth-basic-payload-builder",
  "reth-chainspec",
  "reth-config",
  "reth-consensus",

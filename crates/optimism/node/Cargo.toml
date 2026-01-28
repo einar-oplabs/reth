@@ -70,6 +70,7 @@ reth-e2e-test-utils = { workspace = true, optional = true }
 alloy-genesis = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 alloy-op-evm.workspace = true
+proptest = { workspace = true, optional = false }
 
 [dev-dependencies]
 reth-optimism-node = { workspace = true, features = ["test-utils"] }
@@ -79,6 +80,7 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tasks.workspace = true
 reth-payload-util.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
+reth-basic-payload-builder.workspace = true
 reth-rpc.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-stages-types.workspace = true
