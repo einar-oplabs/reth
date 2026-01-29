@@ -49,7 +49,9 @@ mod tests {
     use reth_trie_db::ChangesetCache;
 
     use alloy_primitives::Address;
-    use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
+    use proptest::{
+        arbitrary::Arbitrary, prelude::*, strategy::ValueTree, test_runner::TestRunner,
+    };
     use reth_transaction_pool::{
         pool::{BasefeeOrd, BlobTransactions, ParkedPool, PendingPool, QueuedOrd},
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
