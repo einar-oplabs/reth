@@ -332,7 +332,11 @@ mod tests {
             .with_chain_spec(OP_MAINNET.clone())
             .with_genesis_block();
         let evm_config = OpEvmConfig::optimism(OP_MAINNET.clone());
-        let validator = EthTransactionValidatorBuilder::new(client, evm_config)
+        let validator: reth_transaction_pool::EthTransactionValidator<
+            MockEthProvider<OpPrimitives, std::sync::Arc<reth_optimism_chainspec::OpChainSpec>>,
+            OpPooledTransaction,
+            OpEvmConfig,
+        > = EthTransactionValidatorBuilder::new(client, evm_config)
             .no_shanghai()
             .no_cancun()
             .build(InMemoryBlobStore::default());

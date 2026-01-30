@@ -5,9 +5,10 @@ use crate::{
 };
 use alloy_consensus::{BlockHeader, Transaction, Typed2718};
 use alloy_evm::Evm as AlloyEvm;
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{TxKind, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
+use op_alloy_consensus::TxDeposit;
 use reth_basic_payload_builder::*;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{
@@ -19,25 +20,32 @@ use reth_evm::{
     ConfigureEvm, Database,
 };
 use reth_execution_types::BlockExecutionOutput;
+use reth_optimism_chainspec::OP_MAINNET;
+use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{transaction::OpTransaction, L2_TO_L1_MESSAGE_PASSER_ADDRESS};
+use reth_optimism_primitives::{
+    transaction::OpTransaction, OpPrimitives, OpTransactionSigned, L2_TO_L1_MESSAGE_PASSER_ADDRESS,
+};
 use reth_optimism_txpool::{
     estimated_da_size::DataAvailabilitySized,
     interop::{is_valid_interop, MaybeInteropTransaction},
-    OpPooledTx,
+    OpPooledTransaction, OpPooledTx, OpTransactionValidator,
 };
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuildNextEnv, BuiltPayloadExecutedBlock, PayloadBuilderAttributes};
 use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives_traits::{
-    HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor, SignedTransaction, TxTy,
+    HeaderTy, NodePrimitives, Recovered, SealedHeader, SealedHeaderFor, SignedTransaction, TxTy,
 };
 use reth_revm::{
     cancelled::CancelOnDrop, database::StateProviderDatabase, db::State,
     witness::ExecutionWitnessRecord,
 };
 use reth_storage_api::{errors::ProviderError, StateProvider, StateProviderFactory};
-use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{
+    blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
+    BestTransactionsAttributes, PoolTransaction, TransactionOrigin, TransactionPool,
+};
 use revm::context::{Block, BlockEnv};
 use std::{marker::PhantomData, sync::Arc};
 use tracing::{debug, trace, warn};

@@ -8,6 +8,7 @@ async fn test_streaming_flashblocks_from_remote_source_is_successful() {
     let stream = WsFlashBlockStream::new(ws_url);
 
     let blocks: Vec<_> = stream.take(items).collect().await;
+    dbg!(&blocks);
 
     for block in blocks {
         assert!(block.is_ok());

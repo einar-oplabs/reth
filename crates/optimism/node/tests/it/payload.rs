@@ -6,9 +6,10 @@ mod tests {
     use alloy_op_hardforks::op_sepolia;
     use alloy_rpc_types_eth::Header;
     use eyre::Ok;
+    use op_alloy_consensus::TxDeposit;
     use reth_basic_payload_builder::PayloadConfig;
     use reth_chainspec::Head;
-    use reth_db::{open_db_read_only, test_utils::create_test_rw_db_with_path};
+    use reth_db::{mdbx::tx::Tx, open_db_read_only, test_utils::create_test_rw_db_with_path};
     use reth_evm::{
         execute::{BlockBuilder, BlockExecutorFactory},
         noop::NoopEvmConfig,
@@ -37,8 +38,10 @@ mod tests {
         builder::{self, ExecutionInfo, OpPayloadBuilderCtx, OpPayloadTransactions},
         config::{OpBuilderConfig, OpGasLimitConfig},
     };
-    use reth_optimism_txpool::OpPooledTransaction;
-    use reth_primitives_traits::SealedHeader;
+    use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
+    use reth_optimism_txpool::{OpPooledTransaction, OpTransactionValidator};
+    use reth_payload_util::BestPayloadTransactions;
+    use reth_primitives_traits::{Recovered, SealedHeader};
     use reth_provider::providers::{BlockchainProvider, RocksDBProvider, StaticFileProvider};
     use reth_revm::{
         cancelled::CancelOnDrop,
@@ -48,15 +51,21 @@ mod tests {
     use reth_tasks::{TaskExecutor, TaskManager, TokioTaskExecutor};
     use reth_trie_db::ChangesetCache;
 
-    use alloy_primitives::Address;
+    use alloy_network::eip2718::Encodable2718;
+    use alloy_primitives::{Address, TxKind, U256};
     use proptest::{
         arbitrary::Arbitrary, prelude::*, strategy::ValueTree, test_runner::TestRunner,
     };
+    use reth_provider::test_utils::MockEthProvider;
     use reth_transaction_pool::{
+        blobstore::InMemoryBlobStore,
+        identifier::{SenderId, TransactionId},
         pool::{BasefeeOrd, BlobTransactions, ParkedPool, PendingPool, QueuedOrd},
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
-        SubPoolLimit,
+        validate::EthTransactionValidatorBuilder,
+        SubPoolLimit, TransactionOrigin, ValidPoolTransaction,
     };
+    use tokio::time::Instant;
 
     /// Generates a set of `depth` dependent transactions, with the specified sender. Its values are
     /// generated using [Arbitrary].
@@ -103,6 +112,41 @@ mod tests {
         txs
     }
 
+    pub fn genoptx() -> OpPooledTransaction {
+        let client = MockEthProvider::<OpPrimitives>::new()
+            .with_chain_spec(OP_MAINNET.clone())
+            .with_genesis_block();
+        let evm_config = OpEvmConfig::optimism(OP_MAINNET.clone());
+
+        let validator: reth_transaction_pool::EthTransactionValidator<
+            MockEthProvider<OpPrimitives, std::sync::Arc<reth_optimism_chainspec::OpChainSpec>>,
+            OpPooledTransaction,
+            OpEvmConfig,
+        > = EthTransactionValidatorBuilder::new(client, evm_config)
+            .no_shanghai()
+            .no_cancun()
+            .build(InMemoryBlobStore::default());
+        let validator = OpTransactionValidator::new(validator);
+
+        let origin = TransactionOrigin::External;
+        let signer = Default::default();
+        let deposit_tx = TxDeposit {
+            source_hash: Default::default(),
+            from: signer,
+            to: TxKind::Create,
+            mint: 0,
+            value: U256::ZERO,
+            gas_limit: 0,
+            is_system_transaction: false,
+            input: Default::default(),
+        };
+        let signed_tx: OpTransactionSigned = deposit_tx.into();
+        let signed_recovered = Recovered::new_unchecked(signed_tx, signer);
+        let len = signed_recovered.encode_2718_len();
+        let pooled_tx: OpPooledTransaction = OpPooledTransaction::new(signed_recovered, len);
+        pooled_tx
+    }
+
     /// Generates many transactions, each with a different sender. The number of transactions per
     /// sender is generated using [Arbitrary]. The number of senders is specified by `senders`.
     ///
@@ -135,6 +179,7 @@ mod tests {
 
         txs
     }
+
     #[tokio::test]
     async fn mock_payload_builder() -> eyre::Result<()> {
         let executor = TaskExecutor::current();
@@ -147,14 +192,14 @@ mod tests {
 
         let provider = factory.provider().unwrap();
 
-        let cb = ComponentsBuilder::default()
-            .node_types::<RethFullAdapter<_, OpNode>>()
-            .noop_pool::<OpPooledTransaction>()
-            .executor(OpExecutorBuilder::default())
-            .noop_consensus()
-            .noop_network::<OpNetworkPrimitives>()
-            // .payload::<OpPayloadBuilder>(op_payload_builder),
-            .noop_payload();
+        // let cb = ComponentsBuilder::default()
+        //     .node_types::<RethFullAdapter<_, OpNode>>()
+        //     .noop_pool::<OpPooledTransaction>()
+        //     .executor(OpExecutorBuilder::default())
+        //     .noop_consensus()
+        //     .noop_network::<OpNetworkPrimitives>()
+        //     // .payload::<OpPayloadBuilder>(op_payload_builder),
+        //     .noop_payload();
 
         // cb.build_components(ctx);
 
@@ -179,7 +224,7 @@ mod tests {
         let sepolia = NodeConfig::new(OP_SEPOLIA.clone());
         // let db = create_test_rw_db_with_path(sepolia.datadir());
         // let dp = pb;
-        let db = reth_revm::State::builder().build();
+        let mut db = reth_revm::State::builder().build();
 
         let mut info = ExecutionInfo::new();
         //define mockPayloadTransactions
@@ -187,9 +232,36 @@ mod tests {
 
         let aa = generate_many_transactions(10, 0, true);
 
+        let optx = genoptx();
+        let cc = aa.into_iter().map(|notx| {
+            //let tx = OpPooledTransaction::new(2, 42);
+
+            let vptx = ValidPoolTransaction {
+                transaction: optx.clone(),
+                transaction_id: TransactionId::new(SenderId::from(43), 42),
+                propagate: false,
+                timestamp: Instant::now().into(),
+                origin: TransactionOrigin::Private,
+                authority_ids: None,
+            };
+
+            // let vptx = OpPooledTransaction {
+            //     inner: todo!(),
+            //     estimated_tx_compressed_size: todo!(),
+            //     _pd: std::marker::PhantomData,
+            //     conditional: todo!(),
+            //     interop: todo!(),
+            //     encoded_2718: todo!(),
+            // };
+
+            Arc::new(vptx)
+        });
+
+        let bb = BestPayloadTransactions::new(cc);
+
         // let best_txs = OpPayloadTransactions::best_transactions(&self, pool, attr);
 
-        let _ = pb.execute_best_transactions(&mut info, &mut mock_builder, aa).unwrap();
+        let _ = pb.execute_best_transactions(&mut info, &mut mock_builder, bb).unwrap();
 
         // let ctx: BuilderContext =
         //     BuilderContext::new(Head::default(), provider, executor, cfg_container);
@@ -208,7 +280,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dd() -> eyre::Result<()> {
+    #[ignore]
+    async fn mock_payload() -> eyre::Result<()> {
         let op_payload_builder = OpPayloadBuilder {
             compute_pending_block: false,
             best_transactions: (),
