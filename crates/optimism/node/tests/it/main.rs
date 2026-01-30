@@ -8,6 +8,4 @@ mod rpc;
 
 mod custom_genesis;
 
-mod payload;
-
 const fn main() {}

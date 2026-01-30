@@ -714,14 +714,16 @@ where
                 );
 
             // here
-            if info.is_tx_over_limits(
+            let over = info.is_tx_over_limits(
                 tx_da_size,
                 block_gas_limit,
                 tx_da_limit,
                 block_da_limit,
                 tx.gas_limit(),
                 da_footprint_gas_scalar,
-            ) {
+            );
+
+            if over {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
@@ -775,6 +777,7 @@ where
             // receipt
             info.cumulative_gas_used += gas_used;
             info.cumulative_da_bytes_used += tx_da_size;
+            dbg!(tx_da_size, tx_da_limit, block_da_limit, over, &info);
 
             // update and add to total fees
             let miner_fee = tx
