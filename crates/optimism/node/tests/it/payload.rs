@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
+use alloy_consensus::{SignableTransaction, TxEip1559};
 use eyre::Ok;
 use op_alloy_consensus::TxDeposit;
 use reth_basic_payload_builder::PayloadConfig;
+use reth_chainspec::NamedChain;
 use reth_db::{
     test_utils::{create_test_rw_db_with_path, TempDatabase},
     DatabaseEnv,
@@ -33,7 +35,11 @@ use reth_revm::cancelled::CancelOnDrop;
 use reth_tasks::TaskManager;
 
 use alloy_network::eip2718::Encodable2718;
-use alloy_primitives::{TxKind, U256};
+use alloy_primitives::{Address, Signature, TxKind, U256};
+use reth_tracing::{
+    tracing,
+    tracing_subscriber::{self, EnvFilter},
+};
 use reth_transaction_pool::{
     identifier::{SenderId, TransactionId},
     TransactionOrigin, ValidPoolTransaction,
@@ -41,7 +47,7 @@ use reth_transaction_pool::{
 use reth_trie_db::ChangesetCache;
 use tokio::time::Instant;
 
-fn generate_op_tx() -> OpPooledTransaction {
+fn generate_op_dep_tx() -> OpPooledTransaction {
     let signer = Default::default();
     let deposit_tx = TxDeposit {
         source_hash: Default::default(),
@@ -60,15 +66,50 @@ fn generate_op_tx() -> OpPooledTransaction {
     pooled_tx
 }
 
+fn generate_op_tx(idx: u64) -> OpPooledTransaction {
+    let chain_spec: OpChainSpec = OpChainSpecBuilder::optimism_mainnet().build();
+    let x = chain_spec.chain();
+
+    let c = NamedChain::Optimism;
+
+    let signer = Default::default();
+
+    let tx = TxEip1559 {
+        chain_id: c.into(),
+        nonce: idx,
+        max_fee_per_gas: 1000,
+        max_priority_fee_per_gas: 0,
+        gas_limit: 50000,
+        to: Address::left_padding_from(&[6]).into(),
+        value: U256::from(7_u64),
+        input: vec![8].into(),
+        access_list: Default::default(),
+    };
+    let sig = Signature::test_signature();
+    let tx_signed = tx.into_signed(sig);
+    let signed_tx: OpTransactionSigned = tx_signed.into();
+    // let envelope: OpTxEnvelope = tx_signed.into();
+
+    let signed_tx: OpTransactionSigned = signed_tx.into();
+    let signed_recovered = Recovered::new_unchecked(signed_tx, signer);
+    let len = 42; // signed_recovered.encode_2718_len();
+    let pooled_tx: OpPooledTransaction = OpPooledTransaction::new(signed_recovered, len);
+    pooled_tx
+}
+
 #[tokio::test]
 async fn mock_payload_builder() -> eyre::Result<()> {
+    tracing_subscriber::fmt().with_env_filter(EnvFilter::from_default_env()).init();
+
     let da_config = OpDAConfig::new(430, 420);
     let evm_config = OpEvmConfig::optimism(OP_MAINNET.clone());
 
-    let gas_limit_config = OpGasLimitConfig::default();
+    let gas_limit_config = OpGasLimitConfig::new(4200000);
+    dbg!(&gas_limit_config);
 
     let header = alloy_consensus::Header::default();
-    let opba = OpPayloadBuilderAttributes::default();
+    let mut opba = OpPayloadBuilderAttributes::default();
+    opba.gas_limit = gas_limit_config.gas_limit();
     let a = Arc::new(SealedHeader::new_unhashed(header));
     let config = PayloadConfig::new(a, opba);
 
@@ -84,10 +125,9 @@ async fn mock_payload_builder() -> eyre::Result<()> {
 
     let mut info = ExecutionInfo::new();
     let mut mock_builder = pb.block_builder(&mut db).unwrap();
-    let optx = generate_op_tx();
-    let cc = (1..42).map(|idx| {
+    let cc = (0..42).map(|idx| {
         let vptx = ValidPoolTransaction {
-            transaction: optx.clone(),
+            transaction: generate_op_tx(idx),
             transaction_id: TransactionId::new(SenderId::from(idx), 42),
             propagate: false,
             timestamp: Instant::now().into(),
@@ -100,9 +140,11 @@ async fn mock_payload_builder() -> eyre::Result<()> {
 
     let bb = BestPayloadTransactions::new(cc);
 
+    dbg!(&bb);
     pb.execute_best_transactions(&mut info, &mut mock_builder, bb).unwrap();
-    //dbg!(info);
+    dbg!(&info);
 
+    assert!(info.cumulative_da_bytes_used > 0);
     Ok(())
 }
 

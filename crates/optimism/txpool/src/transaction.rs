@@ -314,10 +314,10 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{OpPooledTransaction, OpTransactionValidator};
-    use alloy_consensus::transaction::Recovered;
+    use alloy_consensus::{transaction::Recovered, SignableTransaction, TxEip1559};
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{TxKind, U256};
-    use op_alloy_consensus::TxDeposit;
+    use alloy_primitives::{Address, Signature, TxKind, U256};
+    use op_alloy_consensus::{OpTxEnvelope, TxDeposit};
     use reth_optimism_chainspec::OP_MAINNET;
     use reth_optimism_evm::OpEvmConfig;
     use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
@@ -354,7 +354,7 @@ mod tests {
             is_system_transaction: false,
             input: Default::default(),
         };
-        let signed_tx: OpTransactionSigned = deposit_tx.into();
+        // let signed_tx: OpTransactionSigned = tx.into();
         let signed_recovered = Recovered::new_unchecked(signed_tx, signer);
         let len = signed_recovered.encode_2718_len();
         let pooled_tx: OpPooledTransaction = OpPooledTransaction::new(signed_recovered, len);

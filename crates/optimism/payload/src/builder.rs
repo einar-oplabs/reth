@@ -541,6 +541,7 @@ impl ExecutionInfo {
             }
         }
 
+        dbg!(&self.cumulative_gas_used, &tx_gas_limit, &block_gas_limit);
         self.cumulative_gas_used + tx_gas_limit > block_gas_limit
     }
 }
@@ -689,10 +690,12 @@ where
         <<Builder::Executor as BlockExecutor>::Evm as AlloyEvm>::DB: Database,
     {
         let mut block_gas_limit = builder.evm_mut().block().gas_limit();
+        dbg!(block_gas_limit);
         if let Some(gas_limit_config) = self.builder_config.gas_limit_config.gas_limit() {
             // If a gas limit is configured, use that limit as target if it's smaller, otherwise use
             // the block's actual gas limit.
             block_gas_limit = gas_limit_config.min(block_gas_limit);
+            dbg!(block_gas_limit);
         };
         let block_da_limit = self.builder_config.da_config.max_da_block_size();
         let tx_da_limit = self.builder_config.da_config.max_da_tx_size();
@@ -702,6 +705,7 @@ where
         while let Some(tx) = best_txs.next(()) {
             let interop = tx.interop_deadline();
             let tx_da_size = tx.estimated_da_size();
+            dbg!(&tx_da_size, &tx_da_limit, &block_da_limit, &info);
             let tx = tx.into_consensus();
 
             let da_footprint_gas_scalar = self
@@ -713,6 +717,7 @@ where
                     ),
                 );
 
+            dbg!(tx.gas_limit());
             // here
             let over = info.is_tx_over_limits(
                 tx_da_size,
