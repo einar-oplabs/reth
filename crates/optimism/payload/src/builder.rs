@@ -5,9 +5,10 @@ use crate::{
 };
 use alloy_consensus::{BlockHeader, Transaction, Typed2718};
 use alloy_evm::Evm as AlloyEvm;
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{TxKind, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
+use op_alloy_consensus::TxDeposit;
 use reth_basic_payload_builder::*;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{
@@ -19,25 +20,32 @@ use reth_evm::{
     ConfigureEvm, Database,
 };
 use reth_execution_types::BlockExecutionOutput;
+use reth_optimism_chainspec::OP_MAINNET;
+use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{transaction::OpTransaction, L2_TO_L1_MESSAGE_PASSER_ADDRESS};
+use reth_optimism_primitives::{
+    transaction::OpTransaction, OpPrimitives, OpTransactionSigned, L2_TO_L1_MESSAGE_PASSER_ADDRESS,
+};
 use reth_optimism_txpool::{
     estimated_da_size::DataAvailabilitySized,
     interop::{is_valid_interop, MaybeInteropTransaction},
-    OpPooledTx,
+    OpPooledTransaction, OpPooledTx, OpTransactionValidator,
 };
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuildNextEnv, BuiltPayloadExecutedBlock, PayloadBuilderAttributes};
 use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives_traits::{
-    HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor, SignedTransaction, TxTy,
+    HeaderTy, NodePrimitives, Recovered, SealedHeader, SealedHeaderFor, SignedTransaction, TxTy,
 };
 use reth_revm::{
     cancelled::CancelOnDrop, database::StateProviderDatabase, db::State,
     witness::ExecutionWitnessRecord,
 };
 use reth_storage_api::{errors::ProviderError, StateProvider, StateProviderFactory};
-use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{
+    blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
+    BestTransactionsAttributes, PoolTransaction, TransactionOrigin, TransactionPool,
+};
 use revm::context::{Block, BlockEnv};
 use std::{marker::PhantomData, sync::Arc};
 use tracing::{debug, trace, warn};
@@ -358,6 +366,7 @@ impl<Txs> OpBuilder<'_, Txs> {
         // 3. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool() {
             let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
+            //here
             if ctx.execute_best_transactions(&mut info, &mut builder, best_txs)?.is_some() {
                 return Ok(BuildOutcomeKind::Cancelled)
             }
@@ -503,6 +512,7 @@ impl ExecutionInfo {
     ///   per tx.
     /// - block DA limit: if configured, ensures the transaction's DA size does not exceed the
     ///   maximum allowed DA limit per block.
+    /// here
     pub fn is_tx_over_limits(
         &self,
         tx_da_size: u64,
@@ -531,6 +541,7 @@ impl ExecutionInfo {
             }
         }
 
+        dbg!(&self.cumulative_gas_used, &tx_gas_limit, &block_gas_limit);
         self.cumulative_gas_used + tx_gas_limit > block_gas_limit
     }
 }
@@ -634,7 +645,7 @@ where
             }
 
             // Convert the transaction to a [RecoveredTx]. This is
-            // purely for the purposes of utilizing the `evm_config.tx_env`` function.
+            // purely for the purposes of utilizing the `evm_config.tx_env` function.
             // Deposit transactions do not have signatures, so if the tx is a deposit, this
             // will just pull in its `from` address.
             let sequencer_tx = sequencer_tx.value().try_clone_into_recovered().map_err(|_| {
@@ -679,18 +690,22 @@ where
         <<Builder::Executor as BlockExecutor>::Evm as AlloyEvm>::DB: Database,
     {
         let mut block_gas_limit = builder.evm_mut().block().gas_limit();
+        dbg!(block_gas_limit);
         if let Some(gas_limit_config) = self.builder_config.gas_limit_config.gas_limit() {
             // If a gas limit is configured, use that limit as target if it's smaller, otherwise use
             // the block's actual gas limit.
             block_gas_limit = gas_limit_config.min(block_gas_limit);
+            dbg!(block_gas_limit);
         };
         let block_da_limit = self.builder_config.da_config.max_da_block_size();
         let tx_da_limit = self.builder_config.da_config.max_da_tx_size();
         let base_fee = builder.evm_mut().block().basefee();
 
+        // here
         while let Some(tx) = best_txs.next(()) {
             let interop = tx.interop_deadline();
             let tx_da_size = tx.estimated_da_size();
+            dbg!(&tx_da_size, &tx_da_limit, &block_da_limit, &info);
             let tx = tx.into_consensus();
 
             let da_footprint_gas_scalar = self
@@ -702,14 +717,18 @@ where
                     ),
                 );
 
-            if info.is_tx_over_limits(
+            dbg!(tx.gas_limit());
+            // here
+            let over = info.is_tx_over_limits(
                 tx_da_size,
                 block_gas_limit,
                 tx_da_limit,
                 block_da_limit,
                 tx.gas_limit(),
                 da_footprint_gas_scalar,
-            ) {
+            );
+
+            if over {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
@@ -763,6 +782,7 @@ where
             // receipt
             info.cumulative_gas_used += gas_used;
             info.cumulative_da_bytes_used += tx_da_size;
+            dbg!(tx_da_size, tx_da_limit, block_da_limit, over, &info);
 
             // update and add to total fees
             let miner_fee = tx
@@ -772,5 +792,92 @@ where
         }
 
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    mod data_availability_limits {
+        use crate::builder::ExecutionInfo;
+
+        #[test]
+        fn tx_da_size_over_tx_data_limit() {
+            let expected = true;
+            // DA values
+            let tx_da_size = 43;
+            let da_footprint_gas_scalar = Some(32);
+            // DA limits
+            let block_data_limit = Some(4200);
+            let tx_data_limit = Some(42);
+            // Gas limits
+            let block_gas_limit = 42;
+            let tx_gas_limit = 42;
+
+            let execution_info = ExecutionInfo::new();
+            assert_eq!(
+                expected,
+                execution_info.is_tx_over_limits(
+                    tx_da_size,
+                    block_gas_limit,
+                    tx_data_limit,
+                    block_data_limit,
+                    tx_gas_limit,
+                    da_footprint_gas_scalar,
+                )
+            )
+        }
+        #[test]
+        fn tx_da_size_over_block_data_limit() {
+            let expected = true;
+            // DA values
+            let tx_da_size = 43;
+            let da_footprint_gas_scalar = Some(32);
+            // DA limits
+            let block_data_limit = Some(42);
+            let tx_data_limit = Some(4300);
+            // Gas limits
+            let block_gas_limit = 42;
+            let tx_gas_limit = 42;
+
+            let execution_info = ExecutionInfo::new();
+            assert_eq!(
+                expected,
+                execution_info.is_tx_over_limits(
+                    tx_da_size,
+                    block_gas_limit,
+                    tx_data_limit,
+                    block_data_limit,
+                    tx_gas_limit,
+                    da_footprint_gas_scalar,
+                )
+            )
+        }
+        #[test]
+        fn tx_da_size_under_limits() {
+            let expected = false;
+            // DA values
+            let tx_da_size = 1;
+            let da_footprint_gas_scalar = Some(32);
+            // DA limits
+            let block_data_limit = Some(42);
+            let tx_data_limit = Some(42);
+            // Gas limits
+            let block_gas_limit = 42;
+            let tx_gas_limit = 42;
+
+            let execution_info = ExecutionInfo::new();
+            assert_eq!(
+                expected,
+                execution_info.is_tx_over_limits(
+                    tx_da_size,
+                    block_gas_limit,
+                    tx_data_limit,
+                    block_data_limit,
+                    tx_gas_limit,
+                    da_footprint_gas_scalar
+                )
+            )
+        }
     }
 }

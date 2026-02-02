@@ -812,6 +812,7 @@ where
         // fetch the head block from the database
         let head = self.lookup_head()?;
 
+        //here
         let builder_ctx = BuilderContext::new(
             head,
             self.blockchain_db().clone(),

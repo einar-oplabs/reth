@@ -110,7 +110,7 @@ struct OpDAConfigInner {
 pub struct OpGasLimitConfig {
     /// Gas limit for a transaction
     ///
-    /// 0 means use the default gas limit.
+    /// 0 means use the default gas limit. Einar: This seems problematic.
     gas_limit: Arc<AtomicU64>,
 }
 

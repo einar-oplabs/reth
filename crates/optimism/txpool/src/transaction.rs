@@ -66,6 +66,7 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
             interop: Arc::new(AtomicU64::new(NO_INTEROP_TX)),
             _pd: core::marker::PhantomData,
             encoded_2718: Default::default(),
+            // time
         }
     }
 
@@ -115,6 +116,7 @@ impl<Cons, Pooled> MaybeInteropTransaction for OpPooledTransaction<Cons, Pooled>
     }
 }
 
+// here
 impl<Cons: SignedTransaction, Pooled> DataAvailabilitySized for OpPooledTransaction<Cons, Pooled> {
     fn estimated_da_size(&self) -> u64 {
         self.estimated_compressed_size()
@@ -290,6 +292,7 @@ where
 
 /// Helper trait to provide payload builder with access to conditionals and encoded bytes of
 /// transaction.
+/// here
 pub trait OpPooledTx:
     MaybeConditionalTransaction + MaybeInteropTransaction + PoolTransaction + DataAvailabilitySized
 {
@@ -311,10 +314,10 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{OpPooledTransaction, OpTransactionValidator};
-    use alloy_consensus::transaction::Recovered;
+    use alloy_consensus::{transaction::Recovered, SignableTransaction, TxEip1559};
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{TxKind, U256};
-    use op_alloy_consensus::TxDeposit;
+    use alloy_primitives::{Address, Signature, TxKind, U256};
+    use op_alloy_consensus::{OpTxEnvelope, TxDeposit};
     use reth_optimism_chainspec::OP_MAINNET;
     use reth_optimism_evm::OpEvmConfig;
     use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
@@ -329,7 +332,11 @@ mod tests {
             .with_chain_spec(OP_MAINNET.clone())
             .with_genesis_block();
         let evm_config = OpEvmConfig::optimism(OP_MAINNET.clone());
-        let validator = EthTransactionValidatorBuilder::new(client, evm_config)
+        let validator: reth_transaction_pool::EthTransactionValidator<
+            MockEthProvider<OpPrimitives, std::sync::Arc<reth_optimism_chainspec::OpChainSpec>>,
+            OpPooledTransaction,
+            OpEvmConfig,
+        > = EthTransactionValidatorBuilder::new(client, evm_config)
             .no_shanghai()
             .no_cancun()
             .build(InMemoryBlobStore::default());
