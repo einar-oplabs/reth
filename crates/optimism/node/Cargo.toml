@@ -43,6 +43,9 @@ reth-optimism-consensus = { workspace = true, features = ["std"] }
 reth-optimism-forks.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["serde", "serde-bincode-compat", "reth-codec"] }
 
+
+
+
 # revm with required optimism features
 # Note: this must be kept to ensure all features are properly enabled/forwarded
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_limit"] }
@@ -52,6 +55,7 @@ op-revm.workspace = true
 alloy-primitives.workspace = true
 op-alloy-consensus.workspace = true
 op-alloy-rpc-types-engine.workspace = true
+op-alloy-rpc-types.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-consensus.workspace = true

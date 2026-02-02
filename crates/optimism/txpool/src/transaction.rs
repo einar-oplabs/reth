@@ -354,7 +354,7 @@ mod tests {
             is_system_transaction: false,
             input: Default::default(),
         };
-        // let signed_tx: OpTransactionSigned = tx.into();
+        let signed_tx: OpTransactionSigned = deposit_tx.into();
         let signed_recovered = Recovered::new_unchecked(signed_tx, signer);
         let len = signed_recovered.encode_2718_len();
         let pooled_tx: OpPooledTransaction = OpPooledTransaction::new(signed_recovered, len);
